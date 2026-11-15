@@ -151,17 +151,8 @@ export const executeScriptInDocker = async ({
       memoryUsed,
     };
   } catch (error) {
-    console.error(`[${language}] Execution failed:`, error);
-
-    return {
-      status: "internal_error",
-      stdout: "",
-      stderr: "Internal execution error",
-      compilationTime,
-      executionTime,
-      exitCode: null,
-      memoryUsed,
-    };
+    console.error(`[${language}] Infrastructure failure:`, error);
+    throw error;
   } finally {
     if (container) {
       try {

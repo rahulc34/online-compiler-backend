@@ -161,17 +161,8 @@ export const executeJava = async ({
       memoryUsed,
     };
   } catch (error) {
-    console.error("Java execution failed:", error);
-
-    return {
-      status: "internal_error",
-      stdout: "",
-      stderr: "Internal execution error",
-      compilationTime: 0,
-      executionTime: 0,
-      exitCode: null,
-      memoryUsed,
-    };
+    console.error("[JAVA] Infrastructure failure:", error);
+    throw error;
   } finally {
     if (container) {
       try {

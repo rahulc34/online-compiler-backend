@@ -201,17 +201,8 @@ export const executeCpp = async ({
       memoryUsed,
     };
   } catch (error) {
-    console.error("[CPP] Execution failed:", error);
-
-    return {
-      status: "internal_error",
-      stdout: "",
-      stderr: "Internal execution error",
-      compilationTime,
-      executionTime,
-      exitCode: null,
-      memoryUsed,
-    };
+    console.error("[CPP] Infrastructure failure:", error);
+    throw error;
   } finally {
     // 7. Always remove sandbox container.
     if (container) {

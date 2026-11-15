@@ -170,28 +170,66 @@ const processExecution = async (job: Job<ExecutionJobData>) => {
   } catch (error) {
     console.error(`Execution ${executionId} failed:`, error);
 
-    // Check whether cancellation won the state transition.
+    // Check whether cancellation was requested.
     const latestExecution =
       await Execution.findById(executionId).select("status");
 
-    if (latestExecution?.status === "cancelling") {
+    if (!latestExecution) {
+      throw error;
+    }
+
+    if (latestExecution.status === "cancelling") {
       await markExecutionCancelled(executionId);
       return;
     }
 
-    // Mark internal error only if execution is still running.
-    await Execution.updateOne(
+    // Ignore retry handling if execution is no longer running.
+    if (latestExecution.status !== "running") {
+      return;
+    }
+
+    const maxAttempts = job.opts.attempts ?? 1;
+    const isFinalAttempt = job.attemptsMade + 1 >= maxAttempts;
+
+    if (isFinalAttempt) {
+      await Execution.updateOne(
+        {
+          _id: executionId,
+          status: "running",
+        },
+        {
+          $set: {
+            status: "internal_error",
+            stderr: "Execution failed after maximum retry attempts",
+          },
+        },
+      );
+
+      console.error(`Execution ${executionId} exhausted all retry attempts`);
+
+      return;
+    }
+
+    // Reset status so the next attempt can claim this execution.
+    const resetResult = await Execution.updateOne(
       {
         _id: executionId,
         status: "running",
       },
       {
         $set: {
-          status: "internal_error",
-          stderr: "Internal execution error",
+          status: "queued",
+          stderr: "",
         },
       },
     );
+
+    if (resetResult.modifiedCount === 0) {
+      throw new Error(`Unable to reset execution ${executionId} for retry`);
+    }
+
+    // Important: rethrow so BullMQ activates its retry mechanism.
+    throw error;
   } finally {
     clearInterval(heartbeat);
   }
@@ -210,8 +248,38 @@ executionWorker.on("completed", (job) => {
   console.log(`Execution job completed: ${job.id}`);
 });
 
-executionWorker.on("failed", (job, error) => {
+executionWorker.on("failed", async (job, error) => {
   console.error(`Execution job failed: ${job?.id}`, error);
+
+  if (!job) return;
+
+  const maxAttempts = job.opts.attempts ?? 1;
+
+  if (job.attemptsMade < maxAttempts) {
+    return;
+  }
+
+  try {
+    await Execution.updateOne(
+      {
+        _id: job.data.executionId,
+        status: { $in: ["queued", "running"] },
+      },
+      {
+        $set: {
+          status: "internal_error",
+          stderr: "Execution failed after maximum retry attempts",
+        },
+      },
+    );
+
+    console.error(`Execution ${job.data.executionId} marked as internal_error`);
+  } catch (updateError) {
+    console.error(
+      "Failed to update execution after final job failure:",
+      updateError,
+    );
+  }
 });
 
 executionWorker.on("error", (error) => {
