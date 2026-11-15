@@ -24,6 +24,7 @@ export interface JavaExecutionResult {
   compilationTime: number;
   executionTime: number;
   exitCode: number | null;
+  memoryUsed: number;
 }
 
 export const executeJava = async ({
@@ -31,6 +32,7 @@ export const executeJava = async ({
   stdin = "",
 }: JavaExecutionOptions): Promise<JavaExecutionResult> => {
   let container;
+  let memoryUsed = 0;
 
   try {
     const mainFile = files.find((file) => file.name === "Main.java");
@@ -43,6 +45,7 @@ export const executeJava = async ({
         compilationTime: 0,
         executionTime: 0,
         exitCode: null,
+        memoryUsed,
       };
     }
 
@@ -76,6 +79,7 @@ export const executeJava = async ({
         compilationTime,
         executionTime: 0,
         exitCode: null,
+        memoryUsed,
       };
     }
 
@@ -87,6 +91,7 @@ export const executeJava = async ({
         compilationTime,
         executionTime: 0,
         exitCode: compilation.exitCode,
+        memoryUsed,
       };
     }
 
@@ -98,6 +103,7 @@ export const executeJava = async ({
         compilationTime,
         executionTime: 0,
         exitCode: compilation.exitCode,
+        memoryUsed,
       };
     }
 
@@ -111,9 +117,11 @@ export const executeJava = async ({
         timeoutMs: 5000,
         maxOutputBytes: 1024 * 1024,
         stdin,
+        trackMemoryUsage: true,
       },
     );
 
+    memoryUsed = execution.memoryUsed;
     const executionTime = Date.now() - executionStart;
 
     if (execution.timedOut) {
@@ -124,6 +132,7 @@ export const executeJava = async ({
         compilationTime,
         executionTime,
         exitCode: null,
+        memoryUsed,
       };
     }
 
@@ -135,6 +144,7 @@ export const executeJava = async ({
         compilationTime,
         executionTime,
         exitCode: execution.exitCode,
+        memoryUsed,
       };
     }
 
@@ -145,6 +155,7 @@ export const executeJava = async ({
       compilationTime,
       executionTime,
       exitCode: execution.exitCode,
+      memoryUsed,
     };
   } catch (error) {
     console.error("Java execution failed:", error);
@@ -156,6 +167,7 @@ export const executeJava = async ({
       compilationTime: 0,
       executionTime: 0,
       exitCode: null,
+      memoryUsed,
     };
   } finally {
     if (container) {

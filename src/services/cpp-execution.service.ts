@@ -25,6 +25,7 @@ interface CppExecutionResult {
   compilationTime: number;
   executionTime: number;
   exitCode: number | null;
+  memoryUsed: number;
 }
 
 export const executeCpp = async ({
@@ -35,6 +36,7 @@ export const executeCpp = async ({
 
   let compilationTime = 0;
   let executionTime = 0;
+  let memoryUsed = 0;
 
   try {
     // 1. Validate entrypoint.
@@ -48,6 +50,7 @@ export const executeCpp = async ({
         compilationTime: 0,
         executionTime: 0,
         exitCode: null,
+        memoryUsed
       };
     }
 
@@ -109,6 +112,7 @@ export const executeCpp = async ({
         compilationTime,
         executionTime: 0,
         exitCode: null,
+        memoryUsed
       };
     }
 
@@ -120,6 +124,7 @@ export const executeCpp = async ({
         compilationTime,
         executionTime: 0,
         exitCode: compilation.exitCode,
+        memoryUsed
       };
     }
 
@@ -131,6 +136,7 @@ export const executeCpp = async ({
         compilationTime,
         executionTime: 0,
         exitCode: compilation.exitCode,
+        memoryUsed
       };
     }
 
@@ -138,7 +144,6 @@ export const executeCpp = async ({
     console.log("[CPP] Starting execution");
 
     const executionStart = Date.now();
-
     const execution = await executeCommand(
       container,
       ["/tmp/compiler/program"],
@@ -146,9 +151,11 @@ export const executeCpp = async ({
         timeoutMs: 5_000,
         maxOutputBytes: 1024 * 1024,
         stdin,
+        trackMemoryUsage: true,
       },
     );
 
+    memoryUsed = execution.memoryUsed;
     executionTime = Date.now() - executionStart;
 
     console.log("[CPP] Execution finished", {
@@ -164,6 +171,7 @@ export const executeCpp = async ({
         compilationTime,
         executionTime,
         exitCode: null,
+        memoryUsed,
       };
     }
 
@@ -175,6 +183,7 @@ export const executeCpp = async ({
         compilationTime,
         executionTime,
         exitCode: execution.exitCode,
+        memoryUsed,
       };
     }
 
@@ -186,6 +195,7 @@ export const executeCpp = async ({
       compilationTime,
       executionTime,
       exitCode: execution.exitCode,
+      memoryUsed,
     };
   } catch (error) {
     console.error("[CPP] Execution failed:", error);
@@ -197,6 +207,7 @@ export const executeCpp = async ({
       compilationTime,
       executionTime,
       exitCode: null,
+      memoryUsed,
     };
   } finally {
     // 7. Always remove sandbox container.

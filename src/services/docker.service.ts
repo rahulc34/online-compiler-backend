@@ -1,6 +1,7 @@
-import { PassThrough } from "stream";
-import { randomUUID } from "crypto";
+import { PassThrough } from "node:stream";
+import { randomUUID } from "node:crypto";
 import Docker from "dockerode";
+
 import {
   createSourceArchive,
   SourceFile,
@@ -13,6 +14,26 @@ interface CreateSandboxOptions {
   memoryLimit?: number;
   cpuLimit?: number;
 }
+
+export interface CommandResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  timedOut: boolean;
+  outputLimitExceeded: boolean;
+  memoryUsed: number;
+}
+
+interface ExecuteCommandOptions {
+  timeoutMs?: number;
+  maxOutputBytes?: number;
+  stdin?: string;
+  trackMemoryUsage?: boolean;
+}
+
+// --------------------------------------------------
+// 1. Create isolated container
+// --------------------------------------------------
 
 export const createSandboxContainer = async ({
   image,
@@ -32,10 +53,12 @@ export const createSandboxContainer = async ({
       Memory: memoryLimit,
       NanoCpus: cpuLimit,
       PidsLimit: 64,
+
       Tmpfs: {
         "/workspace": "rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001",
         "/tmp/compiler": "rw,exec,nosuid,nodev,size=32m,uid=10001,gid=10001",
       },
+
       AutoRemove: false,
     },
 
@@ -50,9 +73,13 @@ export const createSandboxContainer = async ({
   return container;
 };
 
+// --------------------------------------------------
+// 2. Wait until Docker exec process exits
+// --------------------------------------------------
+
 const waitForExecCompletion = async (
   exec: Docker.Exec,
-  timeoutMs = 5000,
+  timeoutMs: number,
 ): Promise<number> => {
   const startTime = Date.now();
 
@@ -63,11 +90,67 @@ const waitForExecCompletion = async (
       return inspection.ExitCode ?? 1;
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 25));
   }
 
-  throw new Error("Source extraction timed out");
+  throw new Error("Docker exec process did not finish in time");
 };
+
+const startMemoryMonitor = async (container: Docker.Container) => {
+  let peakMemory = 0;
+  let buffer = "";
+
+  const statsStream = await container.stats({ stream: true });
+
+  const processStats = (raw: string) => {
+    try {
+      const stats = JSON.parse(raw);
+      const memoryStats = stats.memory_stats;
+
+      if (typeof memoryStats?.usage !== "number") return;
+
+      const cache =
+        memoryStats.stats?.inactive_file ??
+        memoryStats.stats?.total_inactive_file ??
+        0;
+
+      const currentMemory = Math.max(0, memoryStats.usage - cache);
+
+      peakMemory = Math.max(peakMemory, currentMemory);
+    } catch {
+      // Ignore incomplete or malformed stats records.
+    }
+  };
+
+  statsStream.on("data", (chunk: Buffer) => {
+    buffer += chunk.toString("utf8");
+
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      if (line.trim()) processStats(line);
+    }
+  });
+
+  return {
+    stop: async () => {
+      if (buffer.trim()) processStats(buffer);
+
+      (
+        statsStream as NodeJS.ReadableStream & {
+          destroy: () => void;
+        }
+      ).destroy();
+
+      return peakMemory;
+    },
+  };
+};
+
+// --------------------------------------------------
+// 3. Copy source files into container
+// --------------------------------------------------
 
 export const copySourceFiles = async (
   container: Docker.Container,
@@ -88,103 +171,47 @@ export const copySourceFiles = async (
     stdin: true,
   });
 
-  await new Promise<void>((resolve, reject) => {
-    let stderr = "";
-    let settled = false;
+  const stdout = new PassThrough();
+  const stderrStream = new PassThrough();
 
-    const stdout = new PassThrough();
-    const stderrStream = new PassThrough();
+  let stderr = "";
 
-    const finish = async (error?: Error) => {
-      if (settled) return;
-      settled = true;
-
-      if (error) {
-        reject(error);
-        return;
-      }
-
-      try {
-        const exitCode = await waitForExecCompletion(exec);
-
-        if (exitCode !== 0) {
-          reject(
-            new Error(
-              `Source extraction failed (exit code: ${exitCode}): ${stderr}`,
-            ),
-          );
-          return;
-        }
-
-        resolve();
-      } catch (inspectionError) {
-        reject(inspectionError);
-      }
-    };
-
-    stderrStream.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf8");
-    });
-
-    stream.on("error", (error: Error) => {
-      void finish(error);
-    });
-
-    stream.on("end", () => {
-      void finish();
-    });
-
-    stream.on("close", () => {
-      void finish();
-    });
-
-    docker.modem.demuxStream(stream, stdout, stderrStream);
-
-    stream.end(archive);
+  stderrStream.on("data", (chunk: Buffer) => {
+    stderr += chunk.toString("utf8");
   });
+
+  const streamEnded = new Promise<void>((resolve, reject) => {
+    stream.once("end", resolve);
+    stream.once("error", reject);
+  });
+
+  docker.modem.demuxStream(stream, stdout, stderrStream);
+
+  stdout.resume();
+  stderrStream.resume();
+
+  stream.end(archive);
+
+  try {
+    await streamEnded;
+
+    const exitCode = await waitForExecCompletion(exec, 5000);
+
+    if (exitCode !== 0) {
+      throw new Error(
+        `Source extraction failed (exit code: ${exitCode}): ${stderr}`,
+      );
+    }
+  } finally {
+    stdout.destroy();
+    stderrStream.destroy();
+    stream.destroy();
+  }
 };
 
-export interface CommandResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-  timedOut: boolean;
-  outputLimitExceeded: boolean;
-}
-
-interface ExecuteCommandOptions {
-  timeoutMs?: number;
-  maxOutputBytes?: number;
-  stdin?: string;
-}
-
-export interface CommandResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-  timedOut: boolean;
-  outputLimitExceeded: boolean;
-}
-
-interface ExecuteCommandOptions {
-  timeoutMs?: number;
-  maxOutputBytes?: number;
-  stdin?: string;
-}
-
-export interface CommandResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-  timedOut: boolean;
-  outputLimitExceeded: boolean;
-}
-
-interface ExecuteCommandOptions {
-  timeoutMs?: number;
-  maxOutputBytes?: number;
-  stdin?: string;
-}
+// --------------------------------------------------
+// 4. Execute command
+// --------------------------------------------------
 
 export const executeCommand = async (
   container: Docker.Container,
@@ -193,15 +220,24 @@ export const executeCommand = async (
     timeoutMs = 5000,
     maxOutputBytes = 1024 * 1024,
     stdin = "",
+    trackMemoryUsage = false,
   }: ExecuteCommandOptions = {},
 ): Promise<CommandResult> => {
   let commandToRun = command;
+
+  // Store stdin in a temporary file instead of
+  // attaching it to the Docker exec input stream.
 
   if (stdin.length > 0) {
     const inputFileName = `.compiler-stdin-${randomUUID()}`;
     const inputFilePath = `/workspace/${inputFileName}`;
 
-    await copySourceFiles(container, [{ name: inputFileName, content: stdin }]);
+    await copySourceFiles(container, [
+      {
+        name: inputFileName,
+        content: stdin,
+      },
+    ]);
 
     commandToRun = [
       "sh",
@@ -221,12 +257,19 @@ export const executeCommand = async (
     Tty: false,
   });
 
+  const memoryMonitor = trackMemoryUsage
+    ? await startMemoryMonitor(container).catch((error) => {
+        console.error("Docker memory monitoring failed:", error);
+        return null;
+      })
+    : null;
+
   const stream = await exec.start({
     hijack: true,
     stdin: false,
   });
 
-  return new Promise((resolve, reject) => {
+  return new Promise<CommandResult>((resolve, reject) => {
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
 
@@ -234,25 +277,20 @@ export const executeCommand = async (
     let timedOut = false;
     let outputLimitExceeded = false;
     let settled = false;
-    let sourceEnded = false;
-    let stdoutEnded = false;
-    let stderrEnded = false;
     let terminationRequested = false;
-    let terminationTimer: ReturnType<typeof setTimeout> | undefined;
 
     const stdout = new PassThrough();
     const stderr = new PassThrough();
 
     const cleanup = () => {
       clearTimeout(timer);
-
-      if (terminationTimer) {
-        clearTimeout(terminationTimer);
-      }
+      stdout.destroy();
+      stderr.destroy();
     };
 
     const terminateContainer = async () => {
       if (terminationRequested) return;
+
       terminationRequested = true;
 
       try {
@@ -260,54 +298,35 @@ export const executeCommand = async (
       } catch {
         // Container may already have stopped.
       }
-
-      // Prevent a permanently pending promise if Docker
-      // does not close the execution stream after termination.
-      terminationTimer = setTimeout(() => {
-        stream.destroy();
-      }, 1000);
     };
 
-    const finish = async (error?: Error) => {
+    const finish = async (error?: Error, exitCode = 1) => {
       if (settled) return;
 
       settled = true;
       cleanup();
+
+      let memoryUsed = 0;
+
+      try {
+        memoryUsed = (await memoryMonitor?.stop()) ?? 0;
+      } catch (monitorError) {
+        console.error("Failed to stop Docker memory monitor:", monitorError);
+      }
 
       if (error) {
         reject(error);
         return;
       }
 
-      const result: CommandResult = {
+      resolve({
         stdout: Buffer.concat(stdoutChunks).toString("utf8"),
         stderr: Buffer.concat(stderrChunks).toString("utf8"),
-        exitCode: 1,
+        exitCode,
         timedOut,
         outputLimitExceeded,
-      };
-
-      if (timedOut || outputLimitExceeded) {
-        resolve(result);
-        return;
-      }
-
-      try {
-        const inspection = await exec.inspect();
-
-        resolve({
-          ...result,
-          exitCode: inspection.ExitCode ?? 1,
-        });
-      } catch (inspectionError) {
-        reject(inspectionError);
-      }
-    };
-
-    const checkCompletion = () => {
-      if (sourceEnded && stdoutEnded && stderrEnded) {
-        void finish();
-      }
+        memoryUsed,
+      });
     };
 
     const collect = (target: Buffer[], chunk: Buffer) => {
@@ -340,50 +359,47 @@ export const executeCommand = async (
       collect(stderrChunks, chunk);
     });
 
-    stdout.on("end", () => {
-      stdoutEnded = true;
-      checkCompletion();
-    });
-
-    stderr.on("end", () => {
-      stderrEnded = true;
-      checkCompletion();
-    });
-
     const timer = setTimeout(() => {
       timedOut = true;
       void terminateContainer();
     }, timeoutMs);
 
-    stream.on("end", () => {
-      sourceEnded = true;
-      checkCompletion();
-    });
-
     stream.on("error", (error: Error) => {
-      if (terminationRequested) {
-        sourceEnded = true;
-        stdout.end();
-        stderr.end();
-        checkCompletion();
-      } else {
-        void finish(error);
+      if (!terminationRequested) {
+        finish(error);
       }
     });
 
-    stream.on("close", () => {
-      sourceEnded = true;
+    stream.on("end", async () => {
+      if (settled) return;
 
-      // No more source data can arrive after close.
-      stdout.end();
-      stderr.end();
+      if (timedOut || outputLimitExceeded) {
+        finish();
+        return;
+      }
 
-      checkCompletion();
+      try {
+        const exitCode = await waitForExecCompletion(exec, 2000);
+
+        finish(undefined, exitCode);
+      } catch (error) {
+        finish(
+          error instanceof Error
+            ? error
+            : new Error("Unable to inspect Docker execution"),
+        );
+      }
     });
 
     docker.modem.demuxStream(stream, stdout, stderr);
+
+    stream.resume();
   });
 };
+
+// --------------------------------------------------
+// 5. Remove container
+// --------------------------------------------------
 
 export const removeSandboxContainer = async (
   container: Docker.Container,
@@ -391,7 +407,7 @@ export const removeSandboxContainer = async (
   try {
     await container.stop({ t: 1 });
   } catch {
-    // It may already be stopped.
+    // Container may already be stopped.
   }
 
   try {

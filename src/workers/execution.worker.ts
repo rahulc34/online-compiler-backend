@@ -2,10 +2,12 @@ import { Worker, Job } from "bullmq";
 
 import redisConnection from "../config/redis";
 import Execution from "../models/execution.model";
+
 import {
   EXECUTION_QUEUE_NAME,
   ExecutionJobData,
 } from "../queues/execution.queue";
+
 import { executeCpp } from "../services/cpp-execution.service";
 import { executeJava } from "../services/java-execution.service";
 import { executeJavaScript } from "../services/javascript-execution.service";
@@ -37,52 +39,52 @@ const processExecution = async (job: Job<ExecutionJobData>) => {
   }
 
   try {
-    let result;
-
     const files = execution.files.map((file) => ({
       name: file.name,
       content: file.content,
     }));
 
-    if (execution.language === "cpp") {
-      result = await executeCpp({
-        files,
-        stdin: execution.stdin,
-      });
-    } else if (execution.language === "java") {
-      result = await executeJava({
-        files,
-        stdin: execution.stdin,
-      });
-    } else if (execution.language === "python") {
-      result = await executePython({
-        files,
-        stdin: execution.stdin,
-      });
-    } else if (execution.language === "javascript") {
-      result = await executeJavaScript({
-        files,
-        stdin: execution.stdin,
-      });
-    } else if (execution.language === "typescript") {
-      result = await executeTypeScript({
-        files,
-        stdin: execution.stdin,
-      });
-    } else {
-      result = {
-        status: "internal_error" as const,
-        stdout: "",
-        stderr: `Execution for ${execution.language} is not implemented yet`,
-        compilationTime: 0,
-        executionTime: 0,
-        exitCode: null,
-      };
+    const options = {
+      files,
+      stdin: execution.stdin,
+    };
+
+    let result;
+
+    // Select the appropriate language execution service.
+    switch (execution.language) {
+      case "cpp":
+        result = await executeCpp(options);
+        break;
+
+      case "java":
+        result = await executeJava(options);
+        break;
+
+      case "python":
+        result = await executePython(options);
+        break;
+
+      case "javascript":
+        result = await executeJavaScript(options);
+        break;
+
+      case "typescript":
+        result = await executeTypeScript(options);
+        break;
+
+      default:
+        throw new Error(
+          `Unsupported execution language: ${execution.language}`,
+        );
     }
 
     // Persist execution result.
     await Execution.updateOne(
-      { _id: executionId, status: "running" },
+      {
+        _id: executionId,
+        status: "running",
+      },
       {
         $set: {
           status: result.status,
@@ -90,6 +92,7 @@ const processExecution = async (job: Job<ExecutionJobData>) => {
           stderr: result.stderr,
           compilationTime: result.compilationTime,
           executionTime: result.executionTime,
+          memoryUsed: result.memoryUsed,
           exitCode: result.exitCode,
         },
       },
@@ -102,7 +105,10 @@ const processExecution = async (job: Job<ExecutionJobData>) => {
     console.error(`Execution ${executionId} failed:`, error);
 
     await Execution.updateOne(
-      { _id: executionId, status: "running" },
+      {
+        _id: executionId,
+        status: "running",
+      },
       {
         $set: {
           status: "internal_error",

@@ -19,6 +19,7 @@ export interface ScriptExecutionResult {
   compilationTime: number;
   executionTime: number;
   exitCode: number | null;
+  memoryUsed: number;
 }
 
 interface ScriptExecutionOptions {
@@ -43,6 +44,7 @@ export const executeScriptInDocker = async ({
   let container;
   let compilationTime = 0;
   let executionTime = 0;
+  let memoryUsed = 0;
 
   try {
     if (!files.some((file) => file.name === entryFile)) {
@@ -53,6 +55,7 @@ export const executeScriptInDocker = async ({
         compilationTime,
         executionTime,
         exitCode: null,
+        memoryUsed,
       };
     }
 
@@ -74,6 +77,7 @@ export const executeScriptInDocker = async ({
         compilationTime,
         executionTime,
         exitCode: null,
+        memoryUsed,
       };
     }
 
@@ -85,6 +89,7 @@ export const executeScriptInDocker = async ({
         compilationTime,
         executionTime,
         exitCode: compilation.exitCode,
+        memoryUsed,
       };
     }
 
@@ -96,6 +101,7 @@ export const executeScriptInDocker = async ({
         compilationTime,
         executionTime,
         exitCode: compilation.exitCode,
+        memoryUsed,
       };
     }
 
@@ -104,7 +110,9 @@ export const executeScriptInDocker = async ({
       timeoutMs: 5000,
       maxOutputBytes: 1024 * 1024,
       stdin,
+      trackMemoryUsage: true,
     });
+    memoryUsed = execution.memoryUsed;
     executionTime = Date.now() - executionStart;
 
     if (execution.timedOut) {
@@ -115,6 +123,7 @@ export const executeScriptInDocker = async ({
         compilationTime,
         executionTime,
         exitCode: null,
+        memoryUsed,
       };
     }
 
@@ -126,6 +135,7 @@ export const executeScriptInDocker = async ({
         compilationTime,
         executionTime,
         exitCode: execution.exitCode,
+        memoryUsed,
       };
     }
 
@@ -136,6 +146,7 @@ export const executeScriptInDocker = async ({
       compilationTime,
       executionTime,
       exitCode: execution.exitCode,
+      memoryUsed,
     };
   } catch (error) {
     console.error(`[${language}] Execution failed:`, error);
@@ -147,6 +158,7 @@ export const executeScriptInDocker = async ({
       compilationTime,
       executionTime,
       exitCode: null,
+      memoryUsed,
     };
   } finally {
     if (container) {
