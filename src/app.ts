@@ -9,6 +9,7 @@ import sessionMiddleware from "./config/session";
 import passport from "./config/passport";
 
 import authRoutes from "./modules/auth/auth.routes";
+import executionRoutes from "./modules/execution/execution.routes";
 
 const app = express();
 
@@ -26,6 +27,7 @@ app.use(sessionMiddleware);
 app.use(passport.initialize());
 
 app.use("/api/v1/auth", authRoutes);
+app.use("/api/v1/executions", executionRoutes);
 
 // Health check
 app.get("/api/health", (_req, res) => {

@@ -45,6 +45,8 @@ const envSchema = z.object({
   SMTP_PASSWORD: z.preprocess(emptyToUndefined, z.string().optional()),
 
   EMAIL_FROM: z.preprocess(emptyToUndefined, z.string().email().optional()),
+
+  REDIS_URL: z.string().url().default("redis://127.0.0.1:6379"),
 });
 
 export const loadEnv = () => {

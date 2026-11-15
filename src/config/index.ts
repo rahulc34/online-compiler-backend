@@ -40,4 +40,8 @@ export const config = {
     password: env.SMTP_PASSWORD,
     from: env.EMAIL_FROM,
   },
+
+  redis: {
+    url: env.REDIS_URL,
+  },
 };
