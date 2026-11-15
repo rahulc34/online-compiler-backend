@@ -8,6 +8,7 @@ import {
 import type { SourceFile } from "../utils/create-source-archive";
 
 interface JavaExecutionOptions {
+  executionId: string;
   files: SourceFile[];
   stdin?: string;
 }
@@ -28,6 +29,7 @@ export interface JavaExecutionResult {
 }
 
 export const executeJava = async ({
+  executionId,
   files,
   stdin = "",
 }: JavaExecutionOptions): Promise<JavaExecutionResult> => {
@@ -51,6 +53,7 @@ export const executeJava = async ({
 
     container = await createSandboxContainer({
       image: "compiler-java:latest",
+      executionId,
       memoryLimit: 256 * 1024 * 1024,
       cpuLimit: 500_000_000,
     });
@@ -172,7 +175,7 @@ export const executeJava = async ({
   } finally {
     if (container) {
       try {
-        await removeSandboxContainer(container);
+        await removeSandboxContainer(container, executionId);
       } catch (error) {
         console.error("Java container cleanup failed:", error);
       }

@@ -7,6 +7,7 @@ import {
   createExecutionController,
   getExecutionController,
 } from "./execution.controller";
+import { cancelExecutionController } from "./execution-cancellation.controller";
 import { createExecutionSchema } from "./execution.validation";
 
 const router = Router();
@@ -18,5 +19,6 @@ router.post(
   createExecutionController,
 );
 router.get("/:executionId", requireAuth, getExecutionController);
+router.post("/:executionId/cancel", requireAuth, cancelExecutionController);
 
 export default router;

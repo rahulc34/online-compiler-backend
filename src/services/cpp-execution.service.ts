@@ -8,6 +8,7 @@ import {
 import type { SourceFile } from "../utils/create-source-archive";
 
 interface CppExecutionOptions {
+  executionId: string;
   files: SourceFile[];
   stdin?: string;
 }
@@ -29,6 +30,7 @@ interface CppExecutionResult {
 }
 
 export const executeCpp = async ({
+  executionId,
   files,
   stdin = "",
 }: CppExecutionOptions): Promise<CppExecutionResult> => {
@@ -50,7 +52,7 @@ export const executeCpp = async ({
         compilationTime: 0,
         executionTime: 0,
         exitCode: null,
-        memoryUsed
+        memoryUsed,
       };
     }
 
@@ -59,6 +61,7 @@ export const executeCpp = async ({
 
     container = await createSandboxContainer({
       image: "compiler-cpp:latest",
+      executionId,
       memoryLimit: 256 * 1024 * 1024,
       cpuLimit: 500_000_000,
     });
@@ -112,7 +115,7 @@ export const executeCpp = async ({
         compilationTime,
         executionTime: 0,
         exitCode: null,
-        memoryUsed
+        memoryUsed,
       };
     }
 
@@ -124,7 +127,7 @@ export const executeCpp = async ({
         compilationTime,
         executionTime: 0,
         exitCode: compilation.exitCode,
-        memoryUsed
+        memoryUsed,
       };
     }
 
@@ -136,7 +139,7 @@ export const executeCpp = async ({
         compilationTime,
         executionTime: 0,
         exitCode: compilation.exitCode,
-        memoryUsed
+        memoryUsed,
       };
     }
 
@@ -213,7 +216,7 @@ export const executeCpp = async ({
     // 7. Always remove sandbox container.
     if (container) {
       try {
-        await removeSandboxContainer(container);
+        await removeSandboxContainer(container, executionId);
         console.log("[CPP] Container removed");
       } catch (error) {
         console.error("[CPP] Container cleanup failed:", error);

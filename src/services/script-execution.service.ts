@@ -23,6 +23,7 @@ export interface ScriptExecutionResult {
 }
 
 interface ScriptExecutionOptions {
+  executionId: string;
   language: string;
   image: string;
   entryFile: string;
@@ -33,6 +34,7 @@ interface ScriptExecutionOptions {
 }
 
 export const executeScriptInDocker = async ({
+  executionId,
   language,
   image,
   entryFile,
@@ -59,7 +61,7 @@ export const executeScriptInDocker = async ({
       };
     }
 
-    container = await createSandboxContainer({ image });
+    container = await createSandboxContainer({ image, executionId });
     await copySourceFiles(container, files);
 
     const compilationStart = Date.now();
@@ -163,7 +165,7 @@ export const executeScriptInDocker = async ({
   } finally {
     if (container) {
       try {
-        await removeSandboxContainer(container);
+        await removeSandboxContainer(container, executionId);
       } catch (error) {
         console.error(`[${language}] Container cleanup failed:`, error);
       }

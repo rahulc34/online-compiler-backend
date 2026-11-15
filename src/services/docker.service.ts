@@ -6,11 +6,16 @@ import {
   createSourceArchive,
   SourceFile,
 } from "../utils/create-source-archive";
+import {
+  registerExecutionContainer,
+  unregisterExecutionContainer,
+} from "./execution-container.registry";
 
 const docker = new Docker();
 
 interface CreateSandboxOptions {
   image: string;
+  executionId: string;
   memoryLimit?: number;
   cpuLimit?: number;
 }
@@ -37,6 +42,7 @@ interface ExecuteCommandOptions {
 
 export const createSandboxContainer = async ({
   image,
+  executionId,
   memoryLimit = 256 * 1024 * 1024,
   cpuLimit = 500_000_000,
 }: CreateSandboxOptions) => {
@@ -69,6 +75,18 @@ export const createSandboxContainer = async ({
   });
 
   await container.start();
+
+  try {
+    await registerExecutionContainer(executionId, container);
+  } catch (error) {
+    try {
+      await container.remove({ force: true });
+    } catch {
+      // Best-effort cleanup.
+    }
+
+    throw error;
+  }
 
   return container;
 };
@@ -403,16 +421,21 @@ export const executeCommand = async (
 
 export const removeSandboxContainer = async (
   container: Docker.Container,
+  executionId: string,
 ): Promise<void> => {
   try {
-    await container.stop({ t: 1 });
-  } catch {
-    // Container may already be stopped.
-  }
+    try {
+      await container.stop({ t: 1 });
+    } catch {
+      // Container may already be stopped.
+    }
 
-  try {
-    await container.remove({ force: true });
-  } catch (error) {
-    console.error("Failed to remove Docker container:", error);
+    try {
+      await container.remove({ force: true });
+    } catch (error) {
+      console.error("Failed to remove Docker container:", error);
+    }
+  } finally {
+    unregisterExecutionContainer(executionId);
   }
 };

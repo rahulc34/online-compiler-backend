@@ -3,15 +3,18 @@ import { executeScriptInDocker } from "./script-execution.service";
 import type { SourceFile } from "../utils/create-source-archive";
 
 interface JavaScriptExecutionOptions {
+  executionId: string;
   files: SourceFile[];
   stdin?: string;
 }
 
 export const executeJavaScript = ({
+  executionId,
   files,
   stdin,
 }: JavaScriptExecutionOptions) =>
   executeScriptInDocker({
+    executionId,
     language: "JavaScript",
     image: "compiler-node:latest",
     entryFile: "main.js",

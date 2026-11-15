@@ -3,15 +3,18 @@ import { executeScriptInDocker } from "./script-execution.service";
 import type { SourceFile } from "../utils/create-source-archive";
 
 interface PythonExecutionOptions {
+  executionId: string;
   files: SourceFile[];
   stdin?: string;
 }
 
 export const executePython = ({
+  executionId,
   files,
   stdin,
 }: PythonExecutionOptions) =>
   executeScriptInDocker({
+    executionId,
     language: "Python",
     image: "compiler-python:latest",
     entryFile: "main.py",

@@ -14,6 +14,25 @@ import { executeJavaScript } from "../services/javascript-execution.service";
 import { executePython } from "../services/python-execution.service";
 import { executeTypeScript } from "../services/typescript-execution.service";
 
+const markExecutionCancelled = async (executionId: string) => {
+  const result = await Execution.updateOne(
+    {
+      _id: executionId,
+      status: "cancelling",
+    },
+    {
+      $set: {
+        status: "cancelled",
+        stderr: "",
+      },
+    },
+  );
+
+  if (result.modifiedCount > 0) {
+    console.log(`Execution ${executionId} cancelled successfully`);
+  }
+};
+
 const processExecution = async (job: Job<ExecutionJobData>) => {
   const { executionId } = job.data;
 
@@ -45,6 +64,7 @@ const processExecution = async (job: Job<ExecutionJobData>) => {
     }));
 
     const options = {
+      executionId,
       files,
       stdin: execution.stdin,
     };
@@ -79,8 +99,8 @@ const processExecution = async (job: Job<ExecutionJobData>) => {
         );
     }
 
-    // Persist execution result.
-    await Execution.updateOne(
+    // Atomically save the result only if execution is still running.
+    const updateResult = await Execution.updateOne(
       {
         _id: executionId,
         status: "running",
@@ -98,12 +118,38 @@ const processExecution = async (job: Job<ExecutionJobData>) => {
       },
     );
 
+    if (updateResult.modifiedCount === 0) {
+      const latestExecution =
+        await Execution.findById(executionId).select("status");
+
+      if (latestExecution?.status === "cancelling") {
+        await markExecutionCancelled(executionId);
+        return;
+      }
+
+      console.warn(
+        `Execution ${executionId} result was not saved. Current status: ${latestExecution?.status}`,
+      );
+
+      return;
+    }
+
     console.log(
       `Execution ${executionId} finished with status: ${result.status}`,
     );
   } catch (error) {
     console.error(`Execution ${executionId} failed:`, error);
 
+    // Check whether cancellation won the state transition.
+    const latestExecution =
+      await Execution.findById(executionId).select("status");
+
+    if (latestExecution?.status === "cancelling") {
+      await markExecutionCancelled(executionId);
+      return;
+    }
+
+    // Mark internal error only if execution is still running.
     await Execution.updateOne(
       {
         _id: executionId,

@@ -10,6 +10,8 @@ export type ExecutionLanguage =
 export type ExecutionStatus =
   | "queued"
   | "running"
+  | "cancelling"
+  | "cancelled"
   | "success"
   | "compilation_error"
   | "runtime_error"
@@ -95,6 +97,7 @@ const executionSchema = new Schema<IExecution>(
         "runtime_error",
         "timeout",
         "internal_error",
+        "cancelled",
       ],
       default: "queued",
       required: true,
