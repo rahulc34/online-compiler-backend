@@ -51,6 +51,11 @@ export const createSandboxContainer = async ({
     Cmd: ["sh", "-c", "sleep infinity"],
     Env: ["TMPDIR=/tmp/compiler"],
 
+    Labels: {
+      "compiler.managed": "true",
+      "compiler.executionId": executionId,
+    },
+
     HostConfig: {
       NetworkMode: "none",
       ReadonlyRootfs: true,

@@ -6,18 +6,21 @@ import { config } from "./config";
 
 import { startCancellationListener } from "./services/execution-cancellation.listener";
 import { recoverStaleExecutions } from "./services/execution-recovery.service";
+import { cleanupOrphanedContainers } from "./services/docker-cleanup.service";
 
 const startWorker = async () => {
-  // 1. Connect to MongoDB.
   await connectDatabase(config.database.uri);
 
-  // 2. Recover executions abandoned by previous workers.
+  // Recover stale execution records first.
   await recoverStaleExecutions();
 
-  // 3. Start listening for cancellation requests.
+  // Remove containers belonging to stale or completed executions.
+  await cleanupOrphanedContainers();
+
+  // Start cancellation listener.
   await startCancellationListener();
 
-  // 4. Start the BullMQ execution worker.
+  // Start BullMQ worker.
   await import("./workers/execution.worker.js");
 
   console.log("Execution worker started successfully");
