@@ -3,6 +3,7 @@ import Execution from "../../models/execution.model";
 import { executionQueue } from "../../queues/execution.queue";
 import { ApiError } from "../../utils/api-error";
 import redisConnection from "../../config/redis";
+import { releaseExecutionSlot } from "../../services/execution-concurrency.service";
 
 interface CancelExecutionOptions {
   executionId: string;
@@ -74,6 +75,8 @@ export const cancelExecution = async ({
     if (!cancelled) {
       throw new ApiError(409, "Execution state changed. Please try again.");
     }
+
+    await releaseExecutionSlot(userId, executionId);
 
     return { executionId, status: "cancelled" };
   }

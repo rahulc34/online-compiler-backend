@@ -1,6 +1,7 @@
 import redisConnection from "../config/redis";
 import Execution from "../models/execution.model";
 import { cancelExecutionContainer } from "./execution-container.registry";
+import { releaseExecutionSlot } from "./execution-concurrency.service";
 
 const EXECUTION_CANCEL_CHANNEL = "execution:cancel";
 
@@ -36,17 +37,25 @@ export const startCancellationListener = async () => {
       }
 
       // Mark cancelled only after container termination succeeds.
-      await Execution.updateOne(
+      const cancelledExecution = await Execution.findOneAndUpdate(
         {
           _id: executionId,
           status: "cancelling",
         },
         {
-          $set: { status: "cancelled" },
+          $set: { status: "cancelled", stderr: "" },
         },
-      );
+        { new: true },
+      ).select("userId");
 
-      console.log(`Execution ${executionId} cancelled successfully`);
+      if (cancelledExecution) {
+        await releaseExecutionSlot(
+          cancelledExecution.userId.toString(),
+          executionId,
+        );
+
+        console.log(`Execution ${executionId} cancelled successfully`);
+      }
     } catch (error) {
       console.error("Execution cancellation event failed:", error);
     }

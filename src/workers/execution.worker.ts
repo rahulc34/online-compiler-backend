@@ -13,9 +13,21 @@ import { executeJava } from "../services/java-execution.service";
 import { executeJavaScript } from "../services/javascript-execution.service";
 import { executePython } from "../services/python-execution.service";
 import { executeTypeScript } from "../services/typescript-execution.service";
+import { releaseExecutionSlot } from "../services/execution-concurrency.service";
+
+const releaseSlotSafely = async (userId: string, executionId: string) => {
+  try {
+    await releaseExecutionSlot(userId, executionId);
+  } catch (error) {
+    console.error(
+      `Failed to release execution slot for ${executionId}:`,
+      error,
+    );
+  }
+};
 
 const markExecutionCancelled = async (executionId: string) => {
-  const result = await Execution.updateOne(
+  const execution = await Execution.findOneAndUpdate(
     {
       _id: executionId,
       status: "cancelling",
@@ -26,9 +38,14 @@ const markExecutionCancelled = async (executionId: string) => {
         stderr: "",
       },
     },
-  );
+    {
+      new: true,
+    },
+  ).select("userId");
 
-  if (result.modifiedCount > 0) {
+  if (execution) {
+    await releaseSlotSafely(execution.userId.toString(), executionId);
+
     console.log(`Execution ${executionId} cancelled successfully`);
   }
 };
@@ -164,6 +181,8 @@ const processExecution = async (job: Job<ExecutionJobData>) => {
       return;
     }
 
+    await releaseSlotSafely(execution.userId.toString(), executionId);
+
     console.log(
       `Execution ${executionId} finished with status: ${result.status}`,
     );
@@ -192,11 +211,8 @@ const processExecution = async (job: Job<ExecutionJobData>) => {
     const isFinalAttempt = job.attemptsMade + 1 >= maxAttempts;
 
     if (isFinalAttempt) {
-      await Execution.updateOne(
-        {
-          _id: executionId,
-          status: "running",
-        },
+      const failureResult = await Execution.updateOne(
+        { _id: executionId, status: "running" },
         {
           $set: {
             status: "internal_error",
@@ -205,7 +221,9 @@ const processExecution = async (job: Job<ExecutionJobData>) => {
         },
       );
 
-      console.error(`Execution ${executionId} exhausted all retry attempts`);
+      if (failureResult.modifiedCount > 0) {
+        await releaseSlotSafely(execution.userId.toString(), executionId);
+      }
 
       return;
     }
@@ -284,4 +302,42 @@ executionWorker.on("failed", async (job, error) => {
 
 executionWorker.on("error", (error) => {
   console.error("Execution worker error:", error);
+});
+
+executionWorker.on("failed", async (job, error) => {
+  console.error(`Execution job ${job?.id} failed:`, error);
+
+  if (!job) return;
+
+  const maxAttempts = job.opts.attempts ?? 1;
+
+  if (job.attemptsMade < maxAttempts) return;
+
+  try {
+    const failedExecution = await Execution.findOneAndUpdate(
+      {
+        _id: job.data.executionId,
+        status: { $in: ["queued", "running"] },
+      },
+      {
+        $set: {
+          status: "internal_error",
+          stderr: "Execution failed after maximum retry attempts",
+        },
+      },
+      { new: true },
+    ).select("userId");
+
+    if (failedExecution) {
+      await releaseSlotSafely(
+        failedExecution.userId.toString(),
+        job.data.executionId,
+      );
+    }
+  } catch (updateError) {
+    console.error(
+      `Failed to finalize execution ${job.data.executionId}:`,
+      updateError,
+    );
+  }
 });

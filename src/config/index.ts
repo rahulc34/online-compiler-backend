@@ -44,4 +44,9 @@ export const config = {
   redis: {
     url: env.REDIS_URL,
   },
+
+  execution: {
+    maxActivePerUser: env.MAX_ACTIVE_EXECUTIONS_PER_USER,
+    maxRequestsPerMinute: env.MAX_EXECUTION_REQUESTS_PER_MINUTE,
+  },
 };

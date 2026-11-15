@@ -2,6 +2,7 @@ import { Router } from "express";
 
 import { requireAuth } from "../../middlewares/auth.middleware";
 import { validate } from "../../middlewares/validate.middleware";
+import { executionRateLimiter } from "../../middlewares/execution-rate-limit.middleware";
 
 import {
   createExecutionController,
@@ -16,6 +17,7 @@ router.post(
   "/",
   requireAuth,
   validate(createExecutionSchema),
+  executionRateLimiter,
   createExecutionController,
 );
 router.get("/:executionId", requireAuth, getExecutionController);

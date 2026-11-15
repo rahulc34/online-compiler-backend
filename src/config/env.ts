@@ -47,6 +47,13 @@ const envSchema = z.object({
   EMAIL_FROM: z.preprocess(emptyToUndefined, z.string().email().optional()),
 
   REDIS_URL: z.string().url().default("redis://127.0.0.1:6379"),
+
+  MAX_ACTIVE_EXECUTIONS_PER_USER: z.coerce.number().int().positive().default(2),
+  MAX_EXECUTION_REQUESTS_PER_MINUTE: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(10),
 });
 
 export const loadEnv = () => {
