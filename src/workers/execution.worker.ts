@@ -7,6 +7,7 @@ import {
   ExecutionJobData,
 } from "../queues/execution.queue";
 import { executeCpp } from "../services/cpp-execution.service";
+import { executeJava } from "../services/java-execution.service";
 
 const processExecution = async (job: Job<ExecutionJobData>) => {
   const { executionId } = job.data;
@@ -35,12 +36,19 @@ const processExecution = async (job: Job<ExecutionJobData>) => {
   try {
     let result;
 
+    const files = execution.files.map((file) => ({
+      name: file.name,
+      content: file.content,
+    }));
+
     if (execution.language === "cpp") {
       result = await executeCpp({
-        files: execution.files.map((file) => ({
-          name: file.name,
-          content: file.content,
-        })),
+        files,
+        stdin: execution.stdin,
+      });
+    } else if (execution.language === "java") {
+      result = await executeJava({
+        files,
         stdin: execution.stdin,
       });
     } else {
