@@ -41,6 +41,7 @@ export interface IExecution extends Document {
 
   createdAt: Date;
   updatedAt: Date;
+  lastHeartbeatAt?: Date;
 }
 
 const executionFileSchema = new Schema<IExecutionFile>(
@@ -130,6 +131,11 @@ const executionSchema = new Schema<IExecution>(
 
     exitCode: {
       type: Number,
+    },
+
+    lastHeartbeatAt: {
+      type: Date,
+      default: null,
     },
   },
   {

@@ -33,6 +33,31 @@ const markExecutionCancelled = async (executionId: string) => {
   }
 };
 
+const startExecutionHeartbeat = (executionId: string) => {
+  const heartbeat = setInterval(async () => {
+    try {
+      await Execution.updateOne(
+        {
+          _id: executionId,
+          status: { $in: ["running", "cancelling"] },
+        },
+        {
+          $set: {
+            lastHeartbeatAt: new Date(),
+          },
+        },
+      );
+    } catch (error) {
+      console.error(
+        `Heartbeat update failed for execution ${executionId}:`,
+        error,
+      );
+    }
+  }, 10_000);
+
+  return heartbeat;
+};
+
 const processExecution = async (job: Job<ExecutionJobData>) => {
   const { executionId } = job.data;
 
@@ -45,7 +70,10 @@ const processExecution = async (job: Job<ExecutionJobData>) => {
       status: "queued",
     },
     {
-      $set: { status: "running" },
+      $set: {
+        status: "running",
+        lastHeartbeatAt: new Date(),
+      },
     },
     {
       new: true,
@@ -56,6 +84,8 @@ const processExecution = async (job: Job<ExecutionJobData>) => {
     console.log(`Execution ${executionId} is not queued or does not exist`);
     return;
   }
+
+  const heartbeat = startExecutionHeartbeat(executionId);
 
   try {
     const files = execution.files.map((file) => ({
@@ -162,6 +192,8 @@ const processExecution = async (job: Job<ExecutionJobData>) => {
         },
       },
     );
+  } finally {
+    clearInterval(heartbeat);
   }
 };
 
