@@ -8,6 +8,9 @@ import {
 } from "../queues/execution.queue";
 import { executeCpp } from "../services/cpp-execution.service";
 import { executeJava } from "../services/java-execution.service";
+import { executeJavaScript } from "../services/javascript-execution.service";
+import { executePython } from "../services/python-execution.service";
+import { executeTypeScript } from "../services/typescript-execution.service";
 
 const processExecution = async (job: Job<ExecutionJobData>) => {
   const { executionId } = job.data;
@@ -48,6 +51,21 @@ const processExecution = async (job: Job<ExecutionJobData>) => {
       });
     } else if (execution.language === "java") {
       result = await executeJava({
+        files,
+        stdin: execution.stdin,
+      });
+    } else if (execution.language === "python") {
+      result = await executePython({
+        files,
+        stdin: execution.stdin,
+      });
+    } else if (execution.language === "javascript") {
+      result = await executeJavaScript({
+        files,
+        stdin: execution.stdin,
+      });
+    } else if (execution.language === "typescript") {
+      result = await executeTypeScript({
         files,
         stdin: execution.stdin,
       });

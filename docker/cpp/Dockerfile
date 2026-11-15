@@ -1,7 +1,9 @@
 FROM debian:bookworm-slim
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends g++ && \
+    apt-get install -y --no-install-recommends \
+    g++ \
+    tar && \
     rm -rf /var/lib/apt/lists/*
 
 RUN useradd --uid 10001 --create-home runner && \

@@ -1,9 +1,10 @@
+import { PassThrough } from "stream";
+import { randomUUID } from "crypto";
 import Docker from "dockerode";
 import {
   createSourceArchive,
   SourceFile,
 } from "../utils/create-source-archive";
-import { PassThrough } from "stream";
 
 const docker = new Docker();
 
@@ -19,6 +20,8 @@ export const createSandboxContainer = async ({
   cpuLimit = 500_000_000,
 }: CreateSandboxOptions) => {
   const container = await docker.createContainer({
+    Image: image,
+    Cmd: ["sh", "-c", "sleep infinity"],
     Env: ["TMPDIR=/tmp/compiler"],
 
     HostConfig: {
@@ -29,13 +32,10 @@ export const createSandboxContainer = async ({
       Memory: memoryLimit,
       NanoCpus: cpuLimit,
       PidsLimit: 64,
-
       Tmpfs: {
         "/workspace": "rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001",
-
         "/tmp/compiler": "rw,exec,nosuid,nodev,size=32m,uid=10001,gid=10001",
       },
-
       AutoRemove: false,
     },
 
@@ -50,16 +50,100 @@ export const createSandboxContainer = async ({
   return container;
 };
 
+const waitForExecCompletion = async (
+  exec: Docker.Exec,
+  timeoutMs = 5000,
+): Promise<number> => {
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < timeoutMs) {
+    const inspection = await exec.inspect();
+
+    if (!inspection.Running) {
+      return inspection.ExitCode ?? 1;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+
+  throw new Error("Source extraction timed out");
+};
+
 export const copySourceFiles = async (
   container: Docker.Container,
   files: SourceFile[],
 ): Promise<void> => {
   const archive = await createSourceArchive(files);
 
-  await container.putArchive(archive, {
-    path: "/workspace",
+  const exec = await container.exec({
+    Cmd: ["tar", "-x", "-C", "/workspace"],
+    AttachStdin: true,
+    AttachStdout: true,
+    AttachStderr: true,
+    Tty: false,
+  });
+
+  const stream = await exec.start({
+    hijack: true,
+    stdin: true,
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    let stderr = "";
+    let settled = false;
+
+    const stdout = new PassThrough();
+    const stderrStream = new PassThrough();
+
+    const finish = async (error?: Error) => {
+      if (settled) return;
+      settled = true;
+
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      try {
+        const exitCode = await waitForExecCompletion(exec);
+
+        if (exitCode !== 0) {
+          reject(
+            new Error(
+              `Source extraction failed (exit code: ${exitCode}): ${stderr}`,
+            ),
+          );
+          return;
+        }
+
+        resolve();
+      } catch (inspectionError) {
+        reject(inspectionError);
+      }
+    };
+
+    stderrStream.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
+
+    stream.on("error", (error: Error) => {
+      void finish(error);
+    });
+
+    stream.on("end", () => {
+      void finish();
+    });
+
+    stream.on("close", () => {
+      void finish();
+    });
+
+    docker.modem.demuxStream(stream, stdout, stderrStream);
+
+    stream.end(archive);
   });
 };
+
 export interface CommandResult {
   stdout: string;
   stderr: string;
@@ -111,17 +195,35 @@ export const executeCommand = async (
     stdin = "",
   }: ExecuteCommandOptions = {},
 ): Promise<CommandResult> => {
+  let commandToRun = command;
+
+  if (stdin.length > 0) {
+    const inputFileName = `.compiler-stdin-${randomUUID()}`;
+    const inputFilePath = `/workspace/${inputFileName}`;
+
+    await copySourceFiles(container, [{ name: inputFileName, content: stdin }]);
+
+    commandToRun = [
+      "sh",
+      "-c",
+      'input_file=$1; shift; "$@" < "$input_file"; status=$?; rm -f -- "$input_file"; exit "$status"',
+      "sh",
+      inputFilePath,
+      ...command,
+    ];
+  }
+
   const exec = await container.exec({
-    Cmd: command,
+    Cmd: commandToRun,
     AttachStdout: true,
     AttachStderr: true,
-    AttachStdin: true,
+    AttachStdin: false,
     Tty: false,
   });
 
   const stream = await exec.start({
     hijack: true,
-    stdin: true,
+    stdin: false,
   });
 
   return new Promise((resolve, reject) => {
@@ -280,9 +382,6 @@ export const executeCommand = async (
     });
 
     docker.modem.demuxStream(stream, stdout, stderr);
-
-    // Send stdin and signal EOF.
-    stream.end(stdin);
   });
 };
 

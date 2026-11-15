@@ -1,5 +1,7 @@
 # Dependencies
 node_modules/
+test-files
+src/scripts
 
 # Production build output
 dist/
