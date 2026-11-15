@@ -158,7 +158,7 @@ export const forgotPassword = async (email: string): Promise<void> => {
     },
     {
       upsert: true,
-      new: true,
+      returnDocument: "after",
       runValidators: true,
       setDefaultsOnInsert: true,
     },
@@ -239,7 +239,7 @@ export const resetPassword = async (
       $inc: { sessionVersion: 1 },
     },
     {
-      new: true,
+      returnDocument: "after",
       runValidators: true,
     },
   );

@@ -55,7 +55,7 @@ export const createEmailVerificationOtp = async ({
     },
     {
       upsert: true,
-      new: true,
+      returnDocument: "after",
       runValidators: true,
     },
   );
@@ -119,7 +119,7 @@ export const verifyEmailOtp = async (
       $inc: { attempts: 1 },
     },
     {
-      new: true,
+      returnDocument: "after",
     },
   ).select("+otpHash");
 
