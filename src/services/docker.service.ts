@@ -48,6 +48,7 @@ export const createSandboxContainer = async ({
 }: CreateSandboxOptions) => {
   const container = await docker.createContainer({
     Image: image,
+    User: "10001:10001",
     Cmd: ["sh", "-c", "sleep infinity"],
     Env: ["TMPDIR=/tmp/compiler"],
 
@@ -61,9 +62,28 @@ export const createSandboxContainer = async ({
       ReadonlyRootfs: true,
       CapDrop: ["ALL"],
       SecurityOpt: ["no-new-privileges:true"],
+
+      Init: true,
+
       Memory: memoryLimit,
+      MemorySwap: memoryLimit,
       NanoCpus: cpuLimit,
       PidsLimit: 64,
+
+      Ulimits: [
+        {
+          Name: "nofile",
+          Soft: 1024,
+          Hard: 1024,
+        },
+        {
+          Name: "core",
+          Soft: 0,
+          Hard: 0,
+        },
+      ],
+
+      ShmSize: 16 * 1024 * 1024,
 
       Tmpfs: {
         "/workspace": "rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001",

@@ -61,7 +61,12 @@ export const executeScriptInDocker = async ({
       };
     }
 
-    container = await createSandboxContainer({ image, executionId });
+    container = await createSandboxContainer({
+      image,
+      executionId,
+      memoryLimit: 256 * 1024 * 1024,
+      cpuLimit: 500_000_000,
+    });
     await copySourceFiles(container, files);
 
     const compilationStart = Date.now();

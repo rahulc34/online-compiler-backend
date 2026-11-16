@@ -60,12 +60,16 @@ export const executeJava = async ({
 
     await copySourceFiles(container, files);
 
+    const javaSourcePaths = files
+      .filter((file) => file.name.endsWith(".java"))
+      .map((file) => `/workspace/${file.name}`);
+
     // Compilation
     const compilationStart = Date.now();
 
     const compilation = await executeCommand(
       container,
-      ["javac", "-d", "/tmp/compiler", "/workspace/Main.java"],
+      ["javac", "-d", "/tmp/compiler", ...javaSourcePaths],
       {
         timeoutMs: 10_000,
         maxOutputBytes: 1024 * 1024,
