@@ -99,9 +99,8 @@ export const createSandboxContainer = async ({
     Tty: false,
   });
 
-  await container.start();
-
   try {
+    await container.start();
     await registerExecutionContainer(executionId, container);
   } catch (error) {
     try {
