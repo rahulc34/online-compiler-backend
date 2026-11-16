@@ -23,21 +23,11 @@ export const createExecution = async ({
     throw new ApiError(400, "Invalid user ID");
   }
 
-  // 1. Generate execution ID before reserving a slot.
   const executionId = new mongoose.Types.ObjectId();
-
-  // 2. Atomically reserve an active execution slot.
-  const reserved = await reserveExecutionSlot(userId, executionId.toString());
-
-  if (!reserved) {
-    throw new ApiError(
-      429,
-      "You already have the maximum number of active executions.",
-    );
-  }
+  let slotReserved = false;
 
   try {
-    // 3. Create execution record.
+    // 1. Create the execution record first.
     const execution = await Execution.create({
       _id: executionId,
       userId,
@@ -47,6 +37,19 @@ export const createExecution = async ({
       status: "queued",
     });
 
+    // 2. Reserve the user's concurrency slot.
+    slotReserved = await reserveExecutionSlot(userId, executionId.toString());
+
+    if (!slotReserved) {
+      await Execution.deleteOne({ _id: executionId });
+
+      throw new ApiError(
+        429,
+        "You already have the maximum number of active executions.",
+      );
+    }
+
+    // 3. Add the execution to BullMQ.
     await executionQueue.add(
       "execute",
       { executionId: executionId.toString() },
@@ -55,7 +58,14 @@ export const createExecution = async ({
 
     return execution;
   } catch (error) {
-    // 5. Mark failed submission if its record exists.
+    if (slotReserved) {
+      try {
+        await releaseExecutionSlot(userId, executionId.toString());
+      } catch (releaseError) {
+        console.error("Failed to release execution slot:", releaseError);
+      }
+    }
+
     await Execution.updateOne(
       { _id: executionId, status: "queued" },
       {
@@ -64,14 +74,14 @@ export const createExecution = async ({
           stderr: "Unable to submit execution",
         },
       },
-    );
+    ).catch((dbError) => {
+      console.error(
+        "Failed to update execution after submission error:",
+        dbError,
+      );
+    });
 
-    // 6. Release reserved slot.
-    await releaseExecutionSlot(userId, executionId.toString());
-
-    if (error instanceof ApiError) {
-      throw error;
-    }
+    if (error instanceof ApiError) throw error;
 
     throw new ApiError(503, "Unable to submit execution. Please try again.");
   }
