@@ -225,7 +225,7 @@ const processExecution = async (job: Job<ExecutionJobData>) => {
         await releaseSlotSafely(execution.userId.toString(), executionId);
       }
 
-      return;
+      throw error;
     }
 
     // Reset status so the next attempt can claim this execution.
@@ -267,44 +267,6 @@ executionWorker.on("completed", (job) => {
 });
 
 executionWorker.on("failed", async (job, error) => {
-  console.error(`Execution job failed: ${job?.id}`, error);
-
-  if (!job) return;
-
-  const maxAttempts = job.opts.attempts ?? 1;
-
-  if (job.attemptsMade < maxAttempts) {
-    return;
-  }
-
-  try {
-    await Execution.updateOne(
-      {
-        _id: job.data.executionId,
-        status: { $in: ["queued", "running"] },
-      },
-      {
-        $set: {
-          status: "internal_error",
-          stderr: "Execution failed after maximum retry attempts",
-        },
-      },
-    );
-
-    console.error(`Execution ${job.data.executionId} marked as internal_error`);
-  } catch (updateError) {
-    console.error(
-      "Failed to update execution after final job failure:",
-      updateError,
-    );
-  }
-});
-
-executionWorker.on("error", (error) => {
-  console.error("Execution worker error:", error);
-});
-
-executionWorker.on("failed", async (job, error) => {
   console.error(`Execution job ${job?.id} failed:`, error);
 
   if (!job) return;
@@ -340,4 +302,8 @@ executionWorker.on("failed", async (job, error) => {
       updateError,
     );
   }
+});
+
+executionWorker.on("error", (error) => {
+  console.error("Execution worker error:", error);
 });
